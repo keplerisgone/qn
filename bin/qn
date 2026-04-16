@@ -6,7 +6,7 @@ set -euo pipefail
 
 # ── 기본값 ─────────────────────────────────────────────────────────────────
 DEFAULT_EDITOR="nvim"
-DEFAULT_DIR="$HOME/Documents/20_Sync/qn"
+DEFAULT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/qn/notes"
 RC_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/qn/.qnrc"
 
 # ── 설정 파일 로드 ──────────────────────────────────────────────────────────

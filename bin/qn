@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+# qn — quick note
+# 설정 파일: ~/.config/qn/.qnrc
+
+set -euo pipefail
+
+# ── 기본값 ─────────────────────────────────────────────────────────────────
+DEFAULT_EDITOR="nvim"
+DEFAULT_DIR="$HOME/Documents/20_Sync/qn"
+RC_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/qn/.qnrc"
+
+# ── 설정 파일 로드 ──────────────────────────────────────────────────────────
+load_config() {
+  if [[ -f "$RC_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$RC_FILE"
+  fi
+}
+
+# ── 설정 파일 초기화 ────────────────────────────────────────────────────────
+init_config() {
+  local rc_dir
+  rc_dir="$(dirname "$RC_FILE")"
+  mkdir -p "$rc_dir"
+
+  if [[ ! -f "$RC_FILE" ]]; then
+    cat > "$RC_FILE" <<EOF
+# qn 설정 파일
+QN_EDITOR="${DEFAULT_EDITOR}"
+QN_DIR="${DEFAULT_DIR}"
+EOF
+    echo "설정 파일 생성: $RC_FILE"
+  fi
+}
+
+# ── 노트 디렉토리 확보 ──────────────────────────────────────────────────────
+ensure_notes_dir() {
+  mkdir -p "$QN_DIR"
+}
+
+# ── 사용법 출력 ─────────────────────────────────────────────────────────────
+usage() {
+  cat <<EOF
+Usage:
+  qn                   노트 폴더를 에디터로 열기
+  qn <title>           노트 생성 또는 열기 (<title>.md)
+  qn -l                노트 목록 출력
+  qn -s <keyword>      제목 + 내용 검색
+  qn -d <dir>          기본 디렉토리 변경 (설정 파일에 저장)
+  qn -h                도움말 출력
+EOF
+}
+
+# ── 노트 목록 ───────────────────────────────────────────────────────────────
+list_notes() {
+  ensure_notes_dir
+  local files
+  files=$(find "$QN_DIR" -maxdepth 1 -name "*.md" | sort)
+
+  if [[ -z "$files" ]]; then
+    echo "노트가 없습니다. (디렉토리: $QN_DIR)"
+    return
+  fi
+
+  echo "── qn 노트 목록 ($QN_DIR) ──"
+  while IFS= read -r f; do
+    basename "$f" .md
+  done <<< "$files"
+}
+
+# ── 검색 ────────────────────────────────────────────────────────────────────
+search_notes() {
+  local keyword="$1"
+  ensure_notes_dir
+
+  echo "── 검색: \"$keyword\" ──"
+  local found=0
+
+  while IFS= read -r -d '' f; do
+    local name
+    name=$(basename "$f" .md)
+
+    # 제목 검색
+    if echo "$name" | grep -qi "$keyword"; then
+      echo "[제목] $name"
+      found=1
+      continue
+    fi
+
+    # 내용 검색
+    if grep -qi "$keyword" "$f" 2>/dev/null; then
+      echo "[내용] $name"
+      grep -in "$keyword" "$f" | sed 's/^/       /'
+      found=1
+    fi
+  done < <(find "$QN_DIR" -maxdepth 1 -name "*.md" -print0 | sort -z)
+
+  if [[ $found -eq 0 ]]; then
+    echo "일치하는 노트가 없습니다."
+  fi
+}
+
+# ── 기본 디렉토리 변경 ──────────────────────────────────────────────────────
+change_dir() {
+  local new_dir="$1"
+  # ~ 확장
+  new_dir="${new_dir/#\~/$HOME}"
+
+  mkdir -p "$new_dir"
+
+  # RC 파일에서 QN_DIR 업데이트 (없으면 추가)
+  if grep -q "^QN_DIR=" "$RC_FILE" 2>/dev/null; then
+    sed -i '' "s|^QN_DIR=.*|QN_DIR=\"$new_dir\"|" "$RC_FILE"
+  else
+    echo "QN_DIR=\"$new_dir\"" >> "$RC_FILE"
+  fi
+
+  echo "기본 디렉토리 변경: $new_dir"
+}
+
+# ── 노트 열기/생성 ──────────────────────────────────────────────────────────
+open_note() {
+  local title="$1"
+  ensure_notes_dir
+  local filepath="$QN_DIR/${title}.md"
+
+  if [[ ! -f "$filepath" ]]; then
+    # 파일 헤더 생성
+    printf "# %s\n\n" "$title" > "$filepath"
+    echo "노트 생성: $filepath"
+  fi
+
+  $QN_EDITOR "$filepath"
+}
+
+# ── 폴더 열기 ────────────────────────────────────────────────────────────────
+open_folder() {
+  ensure_notes_dir
+  $QN_EDITOR "$QN_DIR"
+}
+
+# ── 메인 ────────────────────────────────────────────────────────────────────
+main() {
+  init_config
+  load_config
+
+  # 설정 파일의 값을 사용하되, 없으면 기본값
+  QN_EDITOR="${QN_EDITOR:-$DEFAULT_EDITOR}"
+  QN_DIR="${QN_DIR:-$DEFAULT_DIR}"
+
+  if [[ $# -eq 0 ]]; then
+    open_folder
+    return
+  fi
+
+  case "$1" in
+    -h|--help)
+      usage
+      ;;
+    -l)
+      list_notes
+      ;;
+    -s)
+      if [[ $# -lt 2 ]]; then
+        echo "오류: -s 옵션은 검색어가 필요합니다."
+        usage
+        exit 1
+      fi
+      search_notes "$2"
+      ;;
+    -d)
+      if [[ $# -lt 2 ]]; then
+        echo "오류: -d 옵션은 디렉토리 경로가 필요합니다."
+        usage
+        exit 1
+      fi
+      change_dir "$2"
+      ;;
+    -*)
+      echo "알 수 없는 옵션: $1"
+      usage
+      exit 1
+      ;;
+    *)
+      open_note "$1"
+      ;;
+  esac
+}
+
+main "$@"
